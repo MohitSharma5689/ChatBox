@@ -1,49 +1,89 @@
-import java.io.*;
-import java.net.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
 
-public class ChatServer {
-    public static void main(String[] args) {
+public class ChatServer implements Runnable {
+    private ServerSocket serverSocket;
+    private ArrayList<Socket> clients;
+
+    public ChatServer(int port) {
+        clients = new ArrayList<>();
         try {
-            System.out.println("Waiting for client...");
-            ServerSocket ss = new ServerSocket(1115);
-            Socket soc = ss.accept();
-            System.out.println("@Client1 Connected...");
-
-            // BufferedReader to read input from the client
-            BufferedReader infrClient = new BufferedReader(new InputStreamReader(soc.getInputStream()));
-            // BufferedReader to read input from the server sysyem.in = input from keyboard
-            BufferedReader serMsg = new BufferedReader(new InputStreamReader(System.in));
-            // PrintWriter to send data to the client
-            PrintWriter msgout = new PrintWriter(soc.getOutputStream(), true);
-
-            String msgfrClient;
-            while (true) {
-                // Read message from client
-                msgfrClient = infrClient.readLine();
-                if (msgfrClient == null || msgfrClient.equalsIgnoreCase("exit")) {
-                    System.out.println("Client disconnected.");
-                    break;
-                }
-                System.out.println("Client: " + msgfrClient);
-
-                // Prompt to send message to the client
-                System.out.print("Send Message: ");
-                String msg = serMsg.readLine();
-
-                // Check if the server wants to exit
-                if ("exit".equalsIgnoreCase(msg)) {
-                    System.out.println("Exiting...");
-                    msgout.println("Server is shutting down...");
-                    break;
-                }
-
-                msgout.println(msg); // Send message to the client
-            }
-
-            ss.close();
-            soc.close();
+            serverSocket = new ServerSocket(port);
+            System.out.println("Server started.");
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
+
+    public void run() {
+        try {
+            while (true) {
+                Socket socket = serverSocket.accept();
+                clients.add(socket);
+                System.out.println("Client connected: " + socket);
+                new Thread(new ClientHandler(socket, this)).start();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public synchronized void broadcastMessage(String message, Socket senderSocket) {
+        for (Socket client : clients) {
+            if (client != senderSocket) {
+                try {
+                    PrintWriter writer = new PrintWriter(client.getOutputStream(), true);
+                    writer.println(message);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        ChatServer server = new ChatServer(9999);
+        new Thread(server).start();
+    }
 }
+
+class ClientHandler implements Runnable {
+    private Socket socket;
+    private ChatServer server;
+
+    public ClientHandler(Socket socket, ChatServer server) {
+        this.socket = socket;
+        this.server = server;
+    }
+
+    public void run() {
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            PrintWriter writer = new PrintWriter(socket.getOutputStream(), true);
+
+            writer.println("Welcome to ChatBox");
+            String username = reader.readLine();
+            server.broadcastMessage(username + " has joined the chat.", socket);
+
+            String message;
+            while ((message = reader.readLine()) != null) {
+                server.broadcastMessage(username + ": " + message, socket);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                socket.close();
+                server.broadcastMessage("A user has left the chat.", socket);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
+
